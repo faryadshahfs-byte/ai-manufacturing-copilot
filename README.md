@@ -1,75 +1,138 @@
-﻿# AI Manufacturing Knowledge & Troubleshooting Copilot
+# AI Manufacturing Knowledge & Troubleshooting Copilot
 
-An AI-powered engineering knowledge and troubleshooting assistant for industrial maintenance and automation teams.
+An AI-powered engineering knowledge and troubleshooting assistant designed for industrial maintenance and automation teams.
 
-## Vision
+> **Live Demo:**  
+> 🚀 **[Launch AI Manufacturing Troubleshooting Copilot](https://ai-manufacturing-copilot-8yqrvjeqh4dcwoqvaaeyjn.streamlit.app/)**
 
-Help maintenance and automation engineers troubleshoot industrial equipment faster by connecting trusted engineering documentation with AI-powered retrieval and evidence-based guidance.
+The current MVP demonstrates an end-to-end Retrieval-Augmented Generation (RAG) workflow that retrieves relevant engineering knowledge from trusted technical documentation and generates grounded troubleshooting guidance with source-level evidence.
 
-## Initial MVP
+---
 
-**Equipment:** Industrial Motor + VFD
+## 🎯 Problem
 
-The system will:
+Industrial maintenance and automation engineers often spend significant time searching through technical manuals, troubleshooting guides, and equipment documentation when diagnosing faults or maintenance issues.
 
-- Ingest technical manuals and SOPs
-- Extract and clean document content
-- Split documents into meaningful chunks
-- Store document metadata
-- Create searchable representations
-- Retrieve relevant engineering knowledge
-- Generate evidence-backed troubleshooting guidance
-- Cite the source document and relevant section/page
-- Ask clarification questions when required
-- Escalate uncertain or safety-critical situations to a qualified human
+The goal of this project is to reduce that knowledge-search burden by providing an AI copilot that can quickly retrieve relevant engineering information and present it in a practical, evidence-backed format.
 
-## Initial Architecture
+---
 
-User
-  |
-Web Dashboard
-  |
-FastAPI Backend
-  |
-AI / RAG Layer
-  |
-Knowledge Base + Vector Database
-  |
-Technical Manuals / SOPs / Maintenance Records
+## 💡 Solution
 
-## Development Principles
+The AI Manufacturing Knowledge & Troubleshooting Copilot connects trusted engineering documentation with:
 
-- Evidence over hallucination
-- Human-in-the-loop for safety-critical decisions
-- Source and revision traceability
-- Evaluation before production deployment
-- Modular architecture
-- Production-oriented engineering
+- Document ingestion and cleaning
+- Structure-aware document chunking
+- Metadata-aware knowledge representation
+- Hybrid keyword and semantic retrieval
+- FAISS vector search
+- Reciprocal Rank Fusion (RRF)
+- Large Language Model (LLM) generation
+- Evidence-backed troubleshooting responses
+- Source and page-level traceability
+- Human-in-the-loop safety controls
 
-## Project Status
+The system is designed to support engineers rather than replace engineering judgment.
 
-MVP - Under Development
+---
 
-## Roadmap
+## 🚀 Live Demo
 
-### Phase 1
-Document ingestion and knowledge-base pipeline.
+### Try the Application
 
-### Phase 2
-RAG-powered troubleshooting assistant.
+**[▶ Open Live Demo](https://ai-manufacturing-copilot-8yqrvjeqh4dcwoqvaaeyjn.streamlit.app/)**
 
-### Phase 3
-Evaluation, guardrails, observability and production API.
+The deployed Streamlit application demonstrates the complete troubleshooting workflow:
 
-### Phase 4
-Maintenance history and structured equipment data.
+1. Submit a maintenance or troubleshooting question.
+2. Retrieve relevant engineering evidence.
+3. Generate a grounded AI response.
+4. Review the supporting source documents and page references.
 
-### Phase 5
-Bounded AI agents and workflow automation.
+**Deployment:** Streamlit Community Cloud
 
-### Future
-Sensor/IoT integration and ML-based anomaly detection.
+**Current Knowledge Base:** Danfoss VLT AutomationDrive FC 302 Operating Guide
 
-## Safety
+---
 
-This system is designed as a decision-support copilot. It does not autonomously control physical industrial equipment. Final operational decisions remain with qualified personnel.
+## 🏭 Initial MVP
+
+**Equipment Domain:** Industrial Motor + VFD
+
+**Current Equipment Knowledge Base:** Danfoss VLT AutomationDrive FC 302
+
+The current MVP implements:
+
+- Technical manual ingestion
+- PDF text extraction and cleaning
+- Structure-aware document chunking
+- Section, subsection and subsubsection metadata
+- Knowledge-base generation
+- Semantic embeddings
+- FAISS vector indexing
+- Domain-aware keyword retrieval
+- Semantic retrieval
+- Hybrid retrieval using Reciprocal Rank Fusion (RRF)
+- RAG-based answer generation
+- Source/page traceability
+- Safety-oriented response guardrails
+- Streamlit web interface
+
+---
+
+## 🏗️ Architecture
+
+```text
+                    ┌──────────────────────┐
+                    │        User          │
+                    │ Maintenance Question│
+                    └──────────┬───────────┘
+                               │
+                               ▼
+                    ┌──────────────────────┐
+                    │    Streamlit UI      │
+                    │   Web Application    │
+                    └──────────┬───────────┘
+                               │
+                               ▼
+                    ┌──────────────────────┐
+                    │      RAG Service      │
+                    └──────────┬───────────┘
+                               │
+                ┌──────────────┴──────────────┐
+                │                             │
+                ▼                             ▼
+       ┌─────────────────┐          ┌─────────────────┐
+       │ Keyword Search  │          │ Semantic Search │
+       │ Domain-Aware    │          │ Sentence        │
+       │ Retrieval       │          │ Transformers    │
+       └────────┬────────┘          └────────┬────────┘
+                │                            │
+                └──────────────┬─────────────┘
+                               ▼
+                    ┌──────────────────────┐
+                    │ Reciprocal Rank     │
+                    │ Fusion (RRF)        │
+                    └──────────┬───────────┘
+                               │
+                               ▼
+                    ┌──────────────────────┐
+                    │ Retrieved Evidence   │
+                    │ + Metadata           │
+                    └──────────┬───────────┘
+                               │
+                               ▼
+                    ┌──────────────────────┐
+                    │ Groq LLM             │
+                    │ Grounded Generation  │
+                    └──────────┬───────────┘
+                               │
+                               ▼
+                    ┌──────────────────────┐
+                    │ Engineering          │
+                    │ Assessment           │
+                    │ Causes                │
+                    │ Troubleshooting      │
+                    │ Safety                │
+                    │ Evidence             │
+                    └──────────────────────┘
