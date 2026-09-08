@@ -1,5 +1,19 @@
-import re
+﻿import re
 from typing import Any
+
+
+TOP_LEVEL_SECTIONS = {
+    "1": "Introduction",
+    "2": "Safety",
+    "3": "Product Overview",
+    "4": "Mechanical Installation",
+    "5": "Electrical Installation",
+    "6": "Starting the Drive",
+    "7": "Wiring Configuration Examples",
+    "8": "Maintenance, Diagnostics, and Troubleshooting",
+    "9": "Specifications",
+    "10": "Appendix",
+}
 
 
 HEADING_PATTERN = re.compile(
@@ -7,20 +21,32 @@ HEADING_PATTERN = re.compile(
 )
 
 
+MEASUREMENT_VALUE_PATTERN = re.compile(
+    r"^[+-]?\d+(?:\.\d+)?\s*"
+    r"(?:kW|W|MW|Hz|kHz|A|mA|V|mV|RPM|%|°C|°F)$",
+    re.IGNORECASE,
+)
+
+
+DISPLAY_ARTIFACT_PATTERN = re.compile(
+    r"^[+-]?\d+(?:\.\d+)?\s*[A-Za-z%°]+"
+    r"(?:\s*[+-]?\d+(?:\.\d+)?\s*[A-Za-z%°]+)+$",
+    re.IGNORECASE,
+)
+
+
 def detect_heading(line: str):
-    """
-    Detect numbered engineering-document headings.
-
-    Examples:
-        8 Maintenance, Diagnostics, and Troubleshooting
-        8.3 Status Messages
-        8.3.1 Status Message Overview
-        8.4.48 ALARM 50 AMA calibration failed
-    """
-
     line = line.strip()
 
     if not line:
+        return None
+
+    # Equipment display values are not headings.
+    if MEASUREMENT_VALUE_PATTERN.fullmatch(line):
+        return None
+
+    # PDF extraction can concatenate multiple display values.
+    if DISPLAY_ARTIFACT_PATTERN.fullmatch(line):
         return None
 
     match = HEADING_PATTERN.match(line)
@@ -31,27 +57,22 @@ def detect_heading(line: str):
     number = match.group("number")
     title = match.group("title").strip()
 
-    # Ignore Contents entries that normally end with a page number.
-    if re.search(r"\s\d+$", title):
-        return None
-
-    # Ignore unusually long numbered sentences.
     if len(title) > 120:
         return None
 
-    lower_title = title.lower()
-
-    ignored_prefixes = (
-        "position.",
-        "operating mode.",
-        "reference site.",
-        "operation status.",
-    )
-
-    if lower_title.startswith(ignored_prefixes):
+    if re.search(r"\s\d+$", title):
         return None
 
     level = number.count(".") + 1
+
+    if level == 1:
+        expected_title = TOP_LEVEL_SECTIONS.get(number)
+
+        if expected_title is None:
+            return None
+
+        if title != expected_title:
+            return None
 
     return {
         "level": level,
@@ -61,31 +82,34 @@ def detect_heading(line: str):
     }
 
 
-def split_text(text: str, chunk_size: int = 1200) -> list[str]:
+def _split_large_text(
+    text: str,
+    page_number: int,
+    chunk_size: int,
+) -> list[dict]:
     """
-    Split text while trying to preserve paragraph and sentence boundaries.
+    Split one oversized paragraph while preserving its page number.
     """
 
-    text = text.strip()
+    sentences = re.split(
+        r"(?<=[.!?])\s+",
+        text.strip(),
+    )
 
-    if not text:
-        return []
-
-    paragraphs = [
-        paragraph.strip()
-        for paragraph in re.split(r"\n\s*\n", text)
-        if paragraph.strip()
-    ]
-
-    chunks = []
+    results = []
     current = ""
 
-    for paragraph in paragraphs:
+    for sentence in sentences:
+
+        sentence = sentence.strip()
+
+        if not sentence:
+            continue
 
         candidate = (
-            f"{current}\n\n{paragraph}".strip()
+            f"{current} {sentence}".strip()
             if current
-            else paragraph
+            else sentence
         )
 
         if len(candidate) <= chunk_size:
@@ -93,85 +117,167 @@ def split_text(text: str, chunk_size: int = 1200) -> list[str]:
             continue
 
         if current:
-            chunks.append(current)
-            current = ""
-
-        if len(paragraph) <= chunk_size:
-            current = paragraph
-            continue
-
-        sentences = re.split(
-            r"(?<=[.!?])\s+",
-            paragraph,
-        )
-
-        for sentence in sentences:
-
-            sentence = sentence.strip()
-
-            if not sentence:
-                continue
-
-            candidate = (
-                f"{current} {sentence}".strip()
-                if current
-                else sentence
+            results.append(
+                {
+                    "text": current,
+                    "page_start": page_number,
+                    "page_end": page_number,
+                }
             )
 
-            if len(candidate) <= chunk_size:
-                current = candidate
-            else:
+        if len(sentence) <= chunk_size:
+            current = sentence
 
-                if current:
-                    chunks.append(current)
+        else:
+            start = 0
 
-                if len(sentence) > chunk_size:
+            while start < len(sentence):
 
-                    start = 0
+                piece = sentence[
+                    start:start + chunk_size
+                ].strip()
 
-                    while start < len(sentence):
+                if piece:
+                    results.append(
+                        {
+                            "text": piece,
+                            "page_start": page_number,
+                            "page_end": page_number,
+                        }
+                    )
 
-                        piece = sentence[
-                            start:start + chunk_size
-                        ].strip()
+                start += chunk_size
 
-                        if piece:
-                            chunks.append(piece)
-
-                        start += chunk_size
-
-                    current = ""
-
-                else:
-                    current = sentence
+            current = ""
 
     if current:
-        chunks.append(current)
+        results.append(
+            {
+                "text": current,
+                "page_start": page_number,
+                "page_end": page_number,
+            }
+        )
 
-    return chunks
+    return results
+
+
+def _split_blocks(
+    blocks: list[tuple[int, str]],
+    chunk_size: int,
+) -> list[dict]:
+    """
+    Convert page-aware paragraph blocks into chunks while
+    retaining accurate source page boundaries.
+    """
+
+    output = []
+
+    current_parts = []
+    current_length = 0
+    current_page_start = None
+    current_page_end = None
+
+    for page_number, text in blocks:
+
+        text = text.strip()
+
+        if not text:
+            continue
+
+        # Oversized individual paragraph.
+        if len(text) > chunk_size:
+
+            if current_parts:
+                output.append(
+                    {
+                        "text": "\n\n".join(
+                            current_parts
+                        ).strip(),
+                        "page_start": current_page_start,
+                        "page_end": current_page_end,
+                    }
+                )
+
+                current_parts = []
+                current_length = 0
+                current_page_start = None
+                current_page_end = None
+
+            output.extend(
+                _split_large_text(
+                    text,
+                    page_number,
+                    chunk_size,
+                )
+            )
+
+            continue
+
+        separator_length = 2 if current_parts else 0
+
+        if (
+            current_parts
+            and current_length
+            + separator_length
+            + len(text)
+            > chunk_size
+        ):
+
+            output.append(
+                {
+                    "text": "\n\n".join(
+                        current_parts
+                    ).strip(),
+                    "page_start": current_page_start,
+                    "page_end": current_page_end,
+                }
+            )
+
+            current_parts = []
+            current_length = 0
+            current_page_start = None
+            current_page_end = None
+
+        if not current_parts:
+            current_page_start = page_number
+
+        current_parts.append(text)
+        current_length += (
+            (2 if len(current_parts) > 1 else 0)
+            + len(text)
+        )
+        current_page_end = page_number
+
+    if current_parts:
+        output.append(
+            {
+                "text": "\n\n".join(
+                    current_parts
+                ).strip(),
+                "page_start": current_page_start,
+                "page_end": current_page_end,
+            }
+        )
+
+    return output
 
 
 def chunk_pages(
     pages: list[dict[str, Any]],
-    source: str | None = None,
     chunk_size: int = 1200,
-    chunk_overlap: int = 200,
+    overlap: int = 200,
 ) -> list[dict[str, Any]]:
     """
-    Create structure-aware chunks from document pages.
+    Create structure-aware, page-aware chunks.
 
-    Numbered headings define the document hierarchy.
-    Heading-only blocks are not stored as chunks.
-
-    Metadata:
-        section
-        subsection
-        subsubsection
-        page_start
-        page_end
+    Important properties:
+    - Headings remain inside the chunk text.
+    - Each chunk keeps the metadata that was active when its
+      content was parsed.
+    - Page ranges are calculated from the actual source blocks.
+    - Measurement/display values cannot become headings.
     """
-
-    del chunk_overlap  # retained for API compatibility
 
     chunks = []
 
@@ -179,167 +285,140 @@ def chunk_pages(
     current_subsection = None
     current_subsubsection = None
 
-    current_block = []
-
-    block_start_page = None
-    block_end_page = None
-
-    block_section = None
-    block_subsection = None
-    block_subsubsection = None
-
-    # Tracks whether the current block contains actual content
-    # in addition to its heading.
-    block_has_content = False
+    pending_blocks: list[tuple[int, str]] = []
+    current_paragraph_lines: list[str] = []
+    current_paragraph_page = None
 
     chunk_counter = 1
 
-    def flush_block():
-        nonlocal current_block
-        nonlocal block_start_page
-        nonlocal block_end_page
-        nonlocal block_section
-        nonlocal block_subsection
-        nonlocal block_subsubsection
-        nonlocal block_has_content
+    def close_paragraph():
+        nonlocal current_paragraph_lines
+        nonlocal current_paragraph_page
+
+        if current_paragraph_lines:
+            text = "\n".join(
+                current_paragraph_lines
+            ).strip()
+
+            if text:
+                pending_blocks.append(
+                    (
+                        current_paragraph_page,
+                        text,
+                    )
+                )
+
+        current_paragraph_lines = []
+        current_paragraph_page = None
+
+    def flush_pending():
+        nonlocal pending_blocks
         nonlocal chunk_counter
 
-        # Do not create chunks for heading-only blocks.
-        if not current_block or not block_has_content:
-            current_block = []
-            block_start_page = None
-            block_end_page = None
-            block_section = None
-            block_subsection = None
-            block_subsubsection = None
-            block_has_content = False
+        close_paragraph()
+
+        if not pending_blocks:
             return
 
-        block_text = "\n".join(current_block).strip()
-
-        if not block_text:
-            current_block = []
-            block_start_page = None
-            block_end_page = None
-            block_has_content = False
-            return
-
-        text_chunks = split_text(
-            block_text,
-            chunk_size=chunk_size,
+        split_chunks = _split_blocks(
+            pending_blocks,
+            chunk_size,
         )
 
-        for text_chunk in text_chunks:
+        for item in split_chunks:
+
+            text = item["text"].strip()
+
+            if not text:
+                continue
 
             chunks.append(
                 {
-                    "chunk_id": f"chunk-{chunk_counter:04d}",
-                    "source": source,
-                    "page_number": block_start_page,
-                    "page_start": block_start_page,
-                    "page_end": block_end_page,
-                    "section": block_section,
-                    "subsection": block_subsection,
-                    "subsubsection": block_subsubsection,
-                    "text": text_chunk,
+                    "chunk_id": (
+                        f"chunk-{chunk_counter:04d}"
+                    ),
+                    "source": (
+                        "danfoss_vlt_fc302_operating_guide.pdf"
+                    ),
+                    "page_number": item["page_start"],
+                    "page_start": item["page_start"],
+                    "page_end": item["page_end"],
+                    "section": current_section,
+                    "subsection": current_subsection,
+                    "subsubsection": current_subsubsection,
+                    "text": text,
                 }
             )
 
             chunk_counter += 1
 
-        current_block = []
-        block_start_page = None
-        block_end_page = None
-        block_section = None
-        block_subsection = None
-        block_subsubsection = None
-        block_has_content = False
+        pending_blocks = []
 
     for page in pages:
 
-        page_number = page["page_number"]
+        page_number = page.get("page_number")
+        text = (page.get("text") or "").strip()
 
-        # Skip cover and Contents pages.
-        if page_number < 9:
+        if page_number is None or page_number < 9:
             continue
-
-        text = page.get("text", "").strip()
 
         if not text:
             continue
 
-        lines = text.splitlines()
-
-        for raw_line in lines:
+        for raw_line in text.splitlines():
 
             line = raw_line.strip()
 
             if not line:
-                if current_block:
-                    current_block.append("")
+
+                close_paragraph()
                 continue
 
             heading = detect_heading(line)
 
             if heading:
 
-                # Finish the previous block only if it contains
-                # actual content.
-                flush_block()
+                # Finish content belonging to the previous hierarchy.
+                flush_pending()
 
                 level = heading["level"]
-                heading_text = heading["heading"]
 
                 if level == 1:
 
-                    current_section = heading_text
+                    current_section = heading["heading"]
                     current_subsection = None
                     current_subsubsection = None
 
                 elif level == 2:
 
-                    current_subsection = heading_text
-                    current_subsubsection = None
+                    if current_section is not None:
+                        current_subsection = heading["heading"]
+                        current_subsubsection = None
 
-                else:
+                elif level >= 3:
 
-                    current_subsubsection = heading_text
+                    if current_subsection is not None:
+                        current_subsubsection = heading["heading"]
 
-                block_section = current_section
-                block_subsection = current_subsection
-                block_subsubsection = current_subsubsection
+                # Keep the heading itself in the chunk text.
+                current_paragraph_lines = [
+                    heading["heading"]
+                ]
+                current_paragraph_page = page_number
 
-                block_start_page = page_number
-                block_end_page = page_number
+                continue
 
-                current_block.append(heading_text)
+            if current_paragraph_page is None:
+                current_paragraph_page = page_number
 
-                # This is only a heading so far.
-                block_has_content = False
+            current_paragraph_lines.append(line)
 
-            else:
+        # Close only the current paragraph at a page boundary.
+        # Do not flush pending blocks because the same section/
+        # subsection may continue onto the next page.
+        close_paragraph()
 
-                # Content before a new heading continues the
-                # existing document hierarchy.
-                if block_start_page is None:
-
-                    block_start_page = page_number
-
-                    block_section = current_section
-                    block_subsection = current_subsection
-                    block_subsubsection = current_subsubsection
-
-                block_end_page = page_number
-
-                current_block.append(line)
-
-                # We now have actual content.
-                block_has_content = True
-
-        if current_block:
-            block_end_page = page_number
-
-    # Flush the final block.
-    flush_block()
+    # Final content.
+    flush_pending()
 
     return chunks

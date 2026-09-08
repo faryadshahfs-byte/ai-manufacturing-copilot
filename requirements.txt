@@ -1,5 +1,9 @@
-﻿fastapi
-uvicorn[standard]
-pydantic
-python-dotenv
-pypdf
+﻿streamlit==1.63.0
+fastapi==0.141.1
+uvicorn[standard]==0.52.4
+pydantic==2.13.5
+python-dotenv==1.2.3
+pypdf==6.17.0
+sentence-transformers==6.0.1
+faiss-cpu==1.15.0
+groq==1.7.0
